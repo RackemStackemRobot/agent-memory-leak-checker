@@ -1,0 +1,5 @@
+{"trace_id":"t-100","timestamp":"2026-02-06T20:10:01Z","event":"memory_write","user_id":"userA","key":"profile.favorite_color","value_preview":"blue"}
+{"trace_id":"t-100","timestamp":"2026-02-06T20:10:05Z","event":"memory_write","user_id":"userA","key":"session.temp_summary","value_preview":"summary of doc A"}
+{"trace_id":"t-200","timestamp":"2026-02-06T21:15:11Z","event":"memory_read","user_id":"userB","key":"session.temp_summary","value_preview":"summary of doc A"}
+{"trace_id":"t-200","timestamp":"2026-02-06T21:15:14Z","event":"memory_read","user_id":"userB","key":"auth.token","value_preview":"Bearer sk-live-REDACTED"}
+{"trace_id":"t-300","timestamp":"2026-02-06T22:05:09Z","event":"memory_write","user_id":"userC","key":"auth.token","value_preview":"Bearer sk-live-REDACTED"}
