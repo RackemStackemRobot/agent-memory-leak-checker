@@ -18,6 +18,7 @@ def is_suspicious_key(key: str) -> bool:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Agent Memory Leak Checker (MVP)")
     ap.add_argument("--log", required=True, help="Path to JSONL memory log file")
+    ap.add_argument("--out", required=False, help="Optional path to write JSON report")
     args = ap.parse_args()
 
     events = []
@@ -46,7 +47,6 @@ def main() -> int:
 
             events.append(obj)
 
-    # Index writes and reads by key
     writes_by_key = defaultdict(list)
     reads_by_key = defaultdict(list)
 
@@ -62,18 +62,16 @@ def main() -> int:
         elif ev == "memory_read":
             reads_by_key[key].append(e)
 
-    # Findings
     cross_user_findings = []
     cross_trace_session_findings = []
     suspicious_reads_findings = []
 
-    # Cross-user reuse: writer user_id != reader user_id for same key
+    # Cross-user key reuse
     for key, rlist in reads_by_key.items():
         wlist = writes_by_key.get(key, [])
         if not wlist:
             continue
 
-        # Collect unique writers
         writer_users = set()
         writer_traces = set()
         for w in wlist:
@@ -94,17 +92,19 @@ def main() -> int:
             if r_uid not in writer_users:
                 cross_user_findings.append(
                     {
+                        "kind": "cross_user_key_reuse",
                         "key": key,
                         "read_user": r_uid,
                         "read_trace": r_tid,
                         "writer_users": sorted(list(writer_users)),
                         "writer_traces": sorted(list(writer_traces)),
-                        "read_preview": r.get("value_preview", ""),
+                        "read_preview": str(r.get("value_preview", ""))[:160],
                     }
                 )
 
-    # Cross-trace session key reuse: session.* seen in multiple trace_ids
-    for key in set(list(writes_by_key.keys()) + list(reads_by_key.keys())):
+    # Cross-trace session key reuse
+    all_keys = set(list(writes_by_key.keys()) + list(reads_by_key.keys()))
+    for key in all_keys:
         if not isinstance(key, str):
             continue
         if not is_session_key(key):
@@ -123,12 +123,13 @@ def main() -> int:
         if len(trace_ids) > 1:
             cross_trace_session_findings.append(
                 {
+                    "kind": "cross_trace_session_key_reuse",
                     "key": key,
                     "trace_ids": sorted(list(trace_ids)),
                 }
             )
 
-    # Suspicious keys: auth/token/secret-ish keys read by a user different than writer
+    # Suspicious key reads (auth/token/etc)
     for key, rlist in reads_by_key.items():
         if not is_suspicious_key(key):
             continue
@@ -152,11 +153,12 @@ def main() -> int:
             if r_uid not in writer_users:
                 suspicious_reads_findings.append(
                     {
+                        "kind": "suspicious_key_read_cross_user",
                         "key": key,
                         "read_user": r_uid,
-                        "writer_users": sorted(list(writer_users)),
                         "read_trace": r.get("trace_id"),
-                        "read_preview": r.get("value_preview", ""),
+                        "writer_users": sorted(list(writer_users)),
+                        "read_preview": str(r.get("value_preview", ""))[:160],
                     }
                 )
 
@@ -164,7 +166,6 @@ def main() -> int:
     print("Agent Memory Leak Checker")
     print(f"Events loaded: {total} (writes={writes}, reads={reads})")
     print("")
-
     print("Findings")
     print("--------")
     print(f"Cross-user key reuse: {len(cross_user_findings)}")
@@ -180,7 +181,7 @@ def main() -> int:
             print(f"  read_user={fnd['read_user']} read_trace={fnd.get('read_trace')}")
             print(f"  writer_users={', '.join(fnd['writer_users'])}")
             if fnd.get("read_preview"):
-                print(f"  read_preview={str(fnd.get('read_preview'))[:160]}")
+                print(f"  read_preview={fnd.get('read_preview')}")
         print("")
 
     if cross_trace_session_findings:
@@ -197,11 +198,34 @@ def main() -> int:
             print(f"- key={fnd['key']}")
             print(f"  read_user={fnd['read_user']} writer_users={', '.join(fnd['writer_users'])}")
             if fnd.get("read_preview"):
-                print(f"  read_preview={str(fnd.get('read_preview'))[:160]}")
+                print(f"  read_preview={fnd.get('read_preview')}")
         print("")
 
     if not (cross_user_findings or cross_trace_session_findings or suspicious_reads_findings):
         print("No obvious memory leakage signals detected.")
+        print("")
+
+    if args.out:
+        report = {
+            "events_loaded": total,
+            "writes": writes,
+            "reads": reads,
+            "counts": {
+                "cross_user_key_reuse": len(cross_user_findings),
+                "cross_trace_session_key_reuse": len(cross_trace_session_findings),
+                "suspicious_key_read_cross_user": len(suspicious_reads_findings),
+            },
+            "findings": {
+                "cross_user_key_reuse": cross_user_findings,
+                "cross_trace_session_key_reuse": cross_trace_session_findings,
+                "suspicious_key_read_cross_user": suspicious_reads_findings,
+            },
+        }
+
+        with open(args.out, "w", encoding="utf-8") as out_f:
+            json.dump(report, out_f, indent=2)
+
+        print(f"Wrote JSON report to: {args.out}")
         print("")
 
     return 0
@@ -209,4 +233,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
